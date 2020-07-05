@@ -63,7 +63,12 @@ int main(int argc, const char **argv)
 
     dlib::frontal_face_detector frontal_face_detector = dlib::get_frontal_face_detector();
 
+    dlib::shape_predictor face_shape_predictor;
+    dlib::deserialize(argv[1]) >> face_shape_predictor;
+
     cv::VideoCapture cap(deviceId);
+
+    cv::namedWindow("face_recognizer", cv::WINDOW_NORMAL);
 
     if(!cap.isOpened()) {
         std::cerr << "Capture Device ID " << deviceId << "cannot be opened.\n";
@@ -74,47 +79,63 @@ int main(int argc, const char **argv)
     {
         cv::Mat cv_frame;
         cap >> cv_frame;
+        dlib::cv_image<dlib::bgr_pixel> dlib_frame(cv_frame);
 
         cv::Mat original = cv_frame.clone();
 
-        cv::Mat gray;
-        cv::cvtColor(original, gray, cv::COLOR_BGR2GRAY);
+        std::vector<dlib::rectangle> dlib_rects_around_faces = frontal_face_detector(dlib_frame);
+        std::vector<cv::Rect_<int>> cv_rect_around_faces;
 
-        dlib::cv_image<dlib::bgr_pixel> d_frame(cv_frame);
+        for(std::size_t i = 0; i < dlib_rects_around_faces.size(); ++i) {
+            cv::Rect_<int> cv_rect_around_face(dlib_rects_around_faces[i].tl_corner().x(),
+                                               dlib_rects_around_faces[i].tl_corner().y(),
+                                               dlib_rects_around_faces[i].width(),
+                                               dlib_rects_around_faces[i].height());
+            cv_rect_around_faces.push_back(cv_rect_around_face);
+        }
 
-        std::vector<dlib::rectangle> d_faces = frontal_face_detector(d_frame);
-        std::vector<cv::Rect_<int>> cv_faces;
+        for(std::size_t i = 0; i < cv_rect_around_faces.size(); ++i) {
+            cv::rectangle(original, cv_rect_around_faces[i], CV_RGB(0, 255, 0), 1);
+        }
 
-        for(std::size_t i = 0; i < d_faces.size(); ++i) {
-            cv::Rect_<int> face_rect(d_faces[i].tl_corner().x(), d_faces[i].tl_corner().y(), d_faces[i].width(), d_faces[i].height());
-            cv_faces.push_back(face_rect);
+
+        //
+        std::vector<dlib::full_object_detection> face_shapes;
+        for(std::size_t i = 0; i < dlib_rects_around_faces.size(); ++i) {
+            dlib::full_object_detection face_shape = face_shape_predictor(dlib_frame, dlib_rects_around_faces[i]);
+            face_shapes.push_back(face_shape);
+        }
+
+
+        dlib::array<dlib::array2d<dlib::rgb_pixel>> face_chips;
+        dlib::extract_image_chips(dlib_frame, dlib::get_face_chip_details(face_shapes), face_chips);
+
+        std::vector<cv::Mat> cv_faces;
+        for(std::size_t i = 0; i < face_chips.size(); ++i) {
+            cv_faces.push_back(dlib::toMat(face_chips[i]));
         }
 
         for(std::size_t i = 0; i < cv_faces.size(); ++i) {
-            cv::Rect face_i = cv_faces[i];
-            // Crop the face from the image. So simple with OpenCV C++:
-            cv::Mat face = gray(face_i);
-
-            cv::Mat face_resized;
-            cv::resize(face, face_resized, cv::Size(im_width, im_height), 1.0, 1.0, cv::INTER_CUBIC);
-
-            int prediction = model->predict(face_resized);
-
-            cv::rectangle(original, face_i, CV_RGB(0, 255,0), 1);
+            cv::Mat gray;
+            cv::cvtColor(cv_faces[i], gray, cv::COLOR_BGR2GRAY);
+            int predict = model->predict(gray);
 
             std::string box_text;
-            if(prediction == 0) {
+            if(predict == 0) {
                 box_text = "dima";
+                cv::putText(original, box_text, cv::Point(10, 10), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
             }
-            if(prediction == 1) {
+            if(predict == 1) {
                 box_text = "edgar";
+                cv::putText(original, box_text, cv::Point(30, 30), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
             }
-
-            int pos_x = std::max(face_i.tl().x - 10, 0);
-            int pos_y = std::max(face_i.tl().y - 10, 0);
-
-            cv::putText(original, box_text, cv::Point(pos_x, pos_y), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
+            if(predict == 2) {
+                box_text = "putin";
+                cv::putText(original, box_text, cv::Point(50, 50), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
+            }
         }
+        //
+
 
         imshow("face_recognizer", original);
 
