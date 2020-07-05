@@ -83,6 +83,7 @@ int main(int argc, const char **argv)
 //    }
 
     cv::Ptr<cv::face::FaceRecognizer> model = cv::face::FisherFaceRecognizer::create();
+//    model->setThreshold(500);
     model->train(images, labels);
 
     dlib::frontal_face_detector frontal_face_detector = dlib::get_frontal_face_detector();
@@ -119,11 +120,42 @@ int main(int argc, const char **argv)
         }
 
         for(std::size_t i = 0; i < cv_rect_around_faces.size(); ++i) {
-            cv::rectangle(original, cv_rect_around_faces[i], CV_RGB(0, 255, 0), 1);
+
+            auto rect_around_face = cv_rect_around_faces[i];
+
+            dlib::full_object_detection face_shape = face_shape_predictor(dlib_frame, dlib_rects_around_faces[i]);
+
+            dlib::matrix<dlib::rgb_pixel> rgb_processed_face;
+            dlib::extract_image_chip(dlib_frame, dlib::get_face_chip_details(face_shape, 100, 0), rgb_processed_face);
+
+            dlib::matrix<unsigned char> gray_processed_face;
+            dlib::assign_image(gray_processed_face, rgb_processed_face);
+
+            cv::Mat gray_cv_face = dlib::toMat(gray_processed_face);
+            int predicted_label = -1;
+            double predicted_confidence = 0.0;
+
+            model->predict(gray_cv_face, predicted_label, predicted_confidence);
+
+            cv::rectangle(original, rect_around_face, CV_RGB(0, 255,0), 1);
+
+            std::string box_text;
+            if(predicted_label == 0) {
+                box_text = "dima, " + std::to_string(predicted_confidence);
+            }
+            if(predicted_label == 1) {
+                box_text = "edgar, " + std::to_string(predicted_confidence);
+            }
+
+            int pos_x = std::max(rect_around_face.tl().x - 10.0, 0.0);
+            int pos_y = std::max(rect_around_face.tl().y - 10.0, 0.0);
+
+            cv::putText(original, box_text, cv::Point(pos_x, pos_y), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
         }
 
 
         //
+        /*
         std::vector<dlib::full_object_detection> face_shapes;
         for(std::size_t i = 0; i < dlib_rects_around_faces.size(); ++i) {
             dlib::full_object_detection face_shape = face_shape_predictor(dlib_frame, dlib_rects_around_faces[i]);
@@ -153,15 +185,12 @@ int main(int argc, const char **argv)
 
             model->predict(gray_cv_face, predicted_label, predicted_confidence);
 
-//            std::cout << "try predict\n";
-//            cv::imshow(std::to_string(predicted_confidence), gray_cv_face);
-//            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
             std::string box_text;
             box_text = "predicted_label = " + std::to_string(predicted_label)
                     + ", predicted_confidence = " + std::to_string(predicted_confidence);
             cv::putText(original, box_text, cv::Point(10, 10), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
         }
+        */
         //
 
         imshow("face_recognizer", original);
