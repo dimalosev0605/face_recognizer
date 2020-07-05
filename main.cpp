@@ -9,6 +9,7 @@
 #include <dlib/image_processing/render_face_detections.h>
 #include <dlib/image_processing.h>
 #include <dlib/gui_widgets.h>
+#include <dlib/image_io.h>
 
 #include <iostream>
 #include <fstream>
@@ -26,7 +27,27 @@ static void read_csv(const std::string& filename, std::vector<cv::Mat>& images, 
         getline(liness, path, separator);
         getline(liness, classlabel);
         if(!path.empty() && !classlabel.empty()) {
-            images.push_back(cv::imread(path, 0));
+            /*
+            dlib::matrix<unsigned char> img;
+
+
+            dlib::load_jpeg(img, path);
+
+//            std::cout << "Show images:\n";
+//            dlib::image_window* win = new dlib::image_window;;
+//            win->set_image(img);
+
+            cv::Mat cv_img = dlib::toMat(img);
+
+//            cv::imshow(path, cv_img);
+
+            images.push_back(cv_img);
+            labels.push_back(atoi(classlabel.c_str()));
+            */
+
+            auto img = cv::imread(path, cv::IMREAD_GRAYSCALE);
+//            cv::imshow(path, img);
+            images.push_back(img);
             labels.push_back(atoi(classlabel.c_str()));
         }
     }
@@ -55,10 +76,13 @@ int main(int argc, const char **argv)
         return 1;
     }
 
-    int im_width = images[0].cols;
-    int im_height = images[0].rows;
+    // show loaded images
+//    std::cout << "Show loaded images:\n";
+//    for(int i = 0; i < images.size(); ++i) {
+//        cv::imshow(std::to_string(i), images[i]);
+//    }
 
-    cv::Ptr<cv::face::FisherFaceRecognizer> model = cv::face::FisherFaceRecognizer::create();
+    cv::Ptr<cv::face::FaceRecognizer> model = cv::face::FisherFaceRecognizer::create();
     model->train(images, labels);
 
     dlib::frontal_face_detector frontal_face_detector = dlib::get_frontal_face_detector();
@@ -106,36 +130,39 @@ int main(int argc, const char **argv)
             face_shapes.push_back(face_shape);
         }
 
-
-        dlib::array<dlib::array2d<dlib::rgb_pixel>> face_chips;
-        dlib::extract_image_chips(dlib_frame, dlib::get_face_chip_details(face_shapes), face_chips);
-
-        std::vector<cv::Mat> cv_faces;
-        for(std::size_t i = 0; i < face_chips.size(); ++i) {
-            cv_faces.push_back(dlib::toMat(face_chips[i]));
+        std::vector<dlib::matrix<dlib::rgb_pixel>> rgb_processed_faces;
+        for(std::size_t i = 0; i < face_shapes.size(); ++i) {
+            dlib::matrix<dlib::rgb_pixel> processed_face;
+            dlib::extract_image_chip(dlib_frame, dlib::get_face_chip_details(face_shapes[i], 100, 0), processed_face);
+            rgb_processed_faces.push_back(std::move(processed_face));
         }
 
-        for(std::size_t i = 0; i < cv_faces.size(); ++i) {
-            cv::Mat gray;
-            cv::cvtColor(cv_faces[i], gray, cv::COLOR_BGR2GRAY);
-            int predict = model->predict(gray);
+        std::vector<dlib::matrix<unsigned char>> gray_processed_faces;
+        for(std::size_t i = 0; i < rgb_processed_faces.size(); ++i) {
+            dlib::matrix<unsigned char> gray_processed_face;
+            dlib::assign_image(gray_processed_face, rgb_processed_faces[i]);
+            gray_processed_faces.push_back(std::move(gray_processed_face));
+        }
+
+        for(std::size_t i = 0; i < gray_processed_faces.size(); ++i) {
+            cv::Mat gray_cv_face = dlib::toMat(gray_processed_faces[i]);
+
+            int predicted_label = -1;
+            double predicted_confidence = 0.0;
+
+
+            model->predict(gray_cv_face, predicted_label, predicted_confidence);
+
+//            std::cout << "try predict\n";
+//            cv::imshow(std::to_string(predicted_confidence), gray_cv_face);
+//            std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
             std::string box_text;
-            if(predict == 0) {
-                box_text = "dima";
-                cv::putText(original, box_text, cv::Point(10, 10), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
-            }
-            if(predict == 1) {
-                box_text = "edgar";
-                cv::putText(original, box_text, cv::Point(30, 30), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
-            }
-            if(predict == 2) {
-                box_text = "putin";
-                cv::putText(original, box_text, cv::Point(50, 50), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
-            }
+            box_text = "predicted_label = " + std::to_string(predicted_label)
+                    + ", predicted_confidence = " + std::to_string(predicted_confidence);
+            cv::putText(original, box_text, cv::Point(10, 10), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
         }
         //
-
 
         imshow("face_recognizer", original);
 
