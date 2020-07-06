@@ -18,7 +18,7 @@
 static void read_csv(const std::string& filename, std::vector<cv::Mat>& images, std::vector<int>& labels, char separator = ';')
 {
     std::ifstream file(filename.c_str(), std::ifstream::in);
-    if (!file) {
+    if(!file) {
         std::string error_message = "No valid input file was given, please check the given filename.";
     }
     std::string line, path, classlabel;
@@ -27,26 +27,7 @@ static void read_csv(const std::string& filename, std::vector<cv::Mat>& images, 
         getline(liness, path, separator);
         getline(liness, classlabel);
         if(!path.empty() && !classlabel.empty()) {
-            /*
-            dlib::matrix<unsigned char> img;
-
-
-            dlib::load_jpeg(img, path);
-
-//            std::cout << "Show images:\n";
-//            dlib::image_window* win = new dlib::image_window;;
-//            win->set_image(img);
-
-            cv::Mat cv_img = dlib::toMat(img);
-
-//            cv::imshow(path, cv_img);
-
-            images.push_back(cv_img);
-            labels.push_back(atoi(classlabel.c_str()));
-            */
-
             auto img = cv::imread(path, cv::IMREAD_GRAYSCALE);
-//            cv::imshow(path, img);
             images.push_back(img);
             labels.push_back(atoi(classlabel.c_str()));
         }
@@ -55,16 +36,37 @@ static void read_csv(const std::string& filename, std::vector<cv::Mat>& images, 
 
 int main(int argc, const char **argv)
 {
-    if (argc != 4) {
-        std::cout << "usage: " << argv[0] << " </path/to/haar_cascade> </path/to/csv.ext> </path/to/device id>\n";
-        std::cout << "\t </path/to/haar_cascade> -- Path to the Haar Cascade for face detection.\n";
-        std::cout << "\t </path/to/csv.ext> -- Path to the CSV file with the face database.\n";
-        std::cout << "\t <device id> -- The webcam device id to grab frames from.\n";
+    if (argc != 10) {
+        std::cerr << "CLI error.\n"
+                  << "Usage:\n"
+                  << "[1] <path_to_face_landmarks.dat>\n"
+                  << "[2] <path_to_csv_file>\n"
+                  << "[3] <device_id>\n"
+                  << "[4] <show uploaded images?> (int: 0 -> false, 1 -> true)\n"
+                  << "[5] <model_threshold> (int: > 0, 0 -> don't set)\n"
+                  << "[6] <full_face_shape_size> (int > 0). SAME AS IN PREPROCESSING!\n"
+                  << "[7] <full_face_shape_padding> (double >= 0). SAME AS IN PREPROCESSING!\n"
+                  << "[8] <show, what we trying to predict? (int: 0 -> false, 1 -> true)>\n"
+                  << "[9] <show predicted_confidence? (int: 0 -> false, 1 -> true)>\n";
         return 1;
     }
 
     std::string fn_csv = std::string(argv[2]);
-    int deviceId = atoi(argv[3]);
+    int device_id = std::stoi(argv[3]);
+
+    const int show_uploaded_images_temp = std::stoi(argv[4]);
+    const bool show_uploaded_images = show_uploaded_images_temp == 0 ? false : true;
+
+    const int model_threshold = std::stoi(argv[5]);
+
+    const int full_face_shape_size = std::stoi(argv[6]);
+    const double full_face_shape_padding = std::stod(argv[7]);
+
+    const int show_trying_prediction_temp = std::stoi(argv[8]);
+    const bool show_trying_prediction = show_trying_prediction_temp == 0 ? false : true;
+
+    const int is_predicted_confidence_visible_temp = std::stoi(argv[9]);
+    const bool is_predicted_confidence_visible = is_predicted_confidence_visible_temp == 0 ? false : true;
 
     std::vector<cv::Mat> images;
     std::vector<int> labels;
@@ -76,17 +78,24 @@ int main(int argc, const char **argv)
         return 1;
     }
 
-    const int width = images[0].cols;
-    const int height = images[0].rows;
+    if(images.empty()) {
+        std::cerr << "Images were not uploaded!\n";
+        return 1;
+    }
 
-    // show loaded images
-//    std::cout << "Show loaded images:\n";
-//    for(int i = 0; i < images.size(); ++i) {
-//        cv::imshow(std::to_string(i), images[i]);
-//    }
+    const int img_width = images[0].cols;
+    const int img_height = images[0].rows;
+
+    if(show_uploaded_images) {
+        for(std::size_t i = 0; i < images.size(); ++i) {
+            cv::imshow(std::to_string(i), images[i]);
+        }
+    }
 
     cv::Ptr<cv::face::FaceRecognizer> model = cv::face::FisherFaceRecognizer::create();
-//    model->setThreshold(500);
+    if(model_threshold != 0) {
+        model->setThreshold(model_threshold);
+    }
     model->train(images, labels);
 
     dlib::frontal_face_detector frontal_face_detector = dlib::get_frontal_face_detector();
@@ -94,13 +103,13 @@ int main(int argc, const char **argv)
     dlib::shape_predictor face_shape_predictor;
     dlib::deserialize(argv[1]) >> face_shape_predictor;
 
-    cv::VideoCapture cap(deviceId);
+    cv::VideoCapture cap(device_id);
 
     cv::namedWindow("face_recognizer", cv::WINDOW_NORMAL);
 
     if(!cap.isOpened()) {
-        std::cerr << "Capture Device ID " << deviceId << "cannot be opened.\n";
-        return -1;
+        std::cerr << "Capture Device ID " << device_id << " cannot be opened.\n";
+        return 1;
     }
 
     for(;;)
@@ -130,16 +139,17 @@ int main(int argc, const char **argv)
             dlib::matrix<dlib::bgr_pixel> bgr_full_face;
 
             dlib::full_object_detection full_face_shape = face_shape_predictor(dlib_frame, rect_around_full_face);
-            dlib::extract_image_chip(dlib_frame, dlib::get_face_chip_details(full_face_shape, 200, 0.5), bgr_full_face);
+            dlib::extract_image_chip(dlib_frame,
+                                     dlib::get_face_chip_details(full_face_shape, full_face_shape_size, full_face_shape_padding),
+                                     bgr_full_face);
 
-            std::vector<dlib::rectangle> rects_around_little_face = frontal_face_detector(bgr_full_face);
-            if(rects_around_little_face.size() != 1) {
+            std::vector<dlib::rectangle> rects_around_little_faces = frontal_face_detector(bgr_full_face);
+            if(rects_around_little_faces.size() != 1) {
                 std::cerr << "PIZDA!\n";
                 continue;
-    //            std::exit(-228);
             }
 
-            dlib::rectangle rect_around_little_face = rects_around_little_face[0];
+            dlib::rectangle rect_around_little_face = rects_around_little_faces[0];
             dlib::full_object_detection little_face_shape = face_shape_predictor(bgr_full_face, rect_around_little_face);
 
             std::vector<dlib::point> little_face_points;
@@ -185,18 +195,19 @@ int main(int argc, const char **argv)
 
             cv::Mat processed_face = dlib::toMat(bgr_full_face)(cv_processed_face_rect);
 
-//            static int width = processed_face.cols;
-//            static int height = processed_face.rows;
-
             cv::Mat resized_processed_face;
-            cv::resize(processed_face, resized_processed_face, cv::Size(width, height), 0, 0, cv::INTER_CUBIC);
+            cv::resize(processed_face, resized_processed_face, cv::Size(img_width, img_height), 0, 0, cv::INTER_CUBIC);
 
             dlib::matrix<unsigned char> gray_processed_face;
             dlib::assign_image(gray_processed_face, dlib::cv_image<dlib::bgr_pixel>(resized_processed_face));
 
             cv::Mat gray_cv_face = dlib::toMat(gray_processed_face);
-            std::cout << "try predict:\n";
-            cv::imshow("try predict", gray_cv_face);
+
+            if(show_trying_prediction) {
+                cv::imshow("Trying predict", gray_cv_face);
+//                cv::destroyWindow("Trying predict");
+            }
+
             int predicted_label = -1;
             double predicted_confidence = 0.0;
 
@@ -206,100 +217,26 @@ int main(int argc, const char **argv)
 
             std::string box_text;
             if(predicted_label == 0) {
-                box_text = "dima, " + std::to_string(predicted_confidence);
+                box_text = "dima";
+                if(is_predicted_confidence_visible) {
+                    box_text += ", " + std::to_string(predicted_confidence);
+                }
             }
             if(predicted_label == 1) {
-                box_text = "edgar, " + std::to_string(predicted_confidence);
+                box_text = "edgar";
+                if(is_predicted_confidence_visible) {
+                    box_text += ", " + std::to_string(predicted_confidence);
+                }
             }
 
             int pos_x = std::max(cv_rect_around_face.tl().x - 10.0, 0.0);
             int pos_y = std::max(cv_rect_around_face.tl().y - 10.0, 0.0);
 
             cv::putText(original, box_text, cv::Point(pos_x, pos_y), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-            /*
-            auto rect_around_face = cv_rect_around_faces[i];
-
-            dlib::full_object_detection face_shape = face_shape_predictor(dlib_frame, dlib_rects_around_faces[i]);
-
-            dlib::matrix<dlib::rgb_pixel> rgb_processed_face;
-            dlib::extract_image_chip(dlib_frame, dlib::get_face_chip_details(face_shape, 100, 0), rgb_processed_face);
-
-            dlib::matrix<unsigned char> gray_processed_face;
-            dlib::assign_image(gray_processed_face, rgb_processed_face);
-//            dlib::equalize_histogram(gray_processed_face);
-//            std::cout << cv_rect_around_faces[i].width << " - " << cv_rect_around_faces[i].height << '\n';
-
-            cv::Mat gray_cv_face = dlib::toMat(gray_processed_face);
-            int predicted_label = -1;
-            double predicted_confidence = 0.0;
-
-            model->predict(gray_cv_face, predicted_label, predicted_confidence);
-
-            cv::rectangle(original, rect_around_face, CV_RGB(0, 255,0), 1);
-
-            std::string box_text;
-            if(predicted_label == 0) {
-                box_text = "dima, " + std::to_string(predicted_confidence);
-            }
-            if(predicted_label == 1) {
-                box_text = "edgar, " + std::to_string(predicted_confidence);
-            }
-
-            int pos_x = std::max(rect_around_face.tl().x - 10.0, 0.0);
-            int pos_y = std::max(rect_around_face.tl().y - 10.0, 0.0);
-
-            cv::putText(original, box_text, cv::Point(pos_x, pos_y), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
-            */
         }
-
-
-        //
-        /*
-        std::vector<dlib::full_object_detection> face_shapes;
-        for(std::size_t i = 0; i < dlib_rects_around_faces.size(); ++i) {
-            dlib::full_object_detection face_shape = face_shape_predictor(dlib_frame, dlib_rects_around_faces[i]);
-            face_shapes.push_back(face_shape);
-        }
-
-        std::vector<dlib::matrix<dlib::rgb_pixel>> rgb_processed_faces;
-        for(std::size_t i = 0; i < face_shapes.size(); ++i) {
-            dlib::matrix<dlib::rgb_pixel> processed_face;
-            dlib::extract_image_chip(dlib_frame, dlib::get_face_chip_details(face_shapes[i], 100, 0), processed_face);
-            rgb_processed_faces.push_back(std::move(processed_face));
-        }
-
-        std::vector<dlib::matrix<unsigned char>> gray_processed_faces;
-        for(std::size_t i = 0; i < rgb_processed_faces.size(); ++i) {
-            dlib::matrix<unsigned char> gray_processed_face;
-            dlib::assign_image(gray_processed_face, rgb_processed_faces[i]);
-            gray_processed_faces.push_back(std::move(gray_processed_face));
-        }
-
-        for(std::size_t i = 0; i < gray_processed_faces.size(); ++i) {
-            cv::Mat gray_cv_face = dlib::toMat(gray_processed_faces[i]);
-
-            int predicted_label = -1;
-            double predicted_confidence = 0.0;
-
-
-            model->predict(gray_cv_face, predicted_label, predicted_confidence);
-
-            std::string box_text;
-            box_text = "predicted_label = " + std::to_string(predicted_label)
-                    + ", predicted_confidence = " + std::to_string(predicted_confidence);
-            cv::putText(original, box_text, cv::Point(10, 10), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
-        }
-        */
-        //
 
         imshow("face_recognizer", original);
-
-        char key = (char) cv::waitKey(20);
-
-        if(key == 27) break;
+        cv::waitKey(20);
     }
 
     return 0;
