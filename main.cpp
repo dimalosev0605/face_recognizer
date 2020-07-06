@@ -76,6 +76,9 @@ int main(int argc, const char **argv)
         return 1;
     }
 
+    const int width = images[0].cols;
+    const int height = images[0].rows;
+
     // show loaded images
 //    std::cout << "Show loaded images:\n";
 //    for(int i = 0; i < images.size(); ++i) {
@@ -121,6 +124,102 @@ int main(int argc, const char **argv)
 
         for(std::size_t i = 0; i < cv_rect_around_faces.size(); ++i) {
 
+            dlib::rectangle rect_around_full_face = dlib_rects_around_faces[i];
+            auto cv_rect_around_face = cv_rect_around_faces[i];
+
+            dlib::matrix<dlib::bgr_pixel> bgr_full_face;
+
+            dlib::full_object_detection full_face_shape = face_shape_predictor(dlib_frame, rect_around_full_face);
+            dlib::extract_image_chip(dlib_frame, dlib::get_face_chip_details(full_face_shape, 200, 0.5), bgr_full_face);
+
+            std::vector<dlib::rectangle> rects_around_little_face = frontal_face_detector(bgr_full_face);
+            if(rects_around_little_face.size() != 1) {
+                std::cerr << "PIZDA!\n";
+                continue;
+    //            std::exit(-228);
+            }
+
+            dlib::rectangle rect_around_little_face = rects_around_little_face[0];
+            dlib::full_object_detection little_face_shape = face_shape_predictor(bgr_full_face, rect_around_little_face);
+
+            std::vector<dlib::point> little_face_points;
+            const auto number_of_points = little_face_shape.num_parts();
+            for(std::size_t j = 0; j < number_of_points; ++j) {
+                little_face_points.push_back(little_face_shape.part(j));
+            }
+
+            // main points:
+
+            // near ears
+            dlib::point point_0 = little_face_points[0];
+            dlib::point point_1 = little_face_points[16];
+
+            // under mouth
+            dlib::point point_2 = little_face_points[5];
+            dlib::point point_3 = little_face_points[11];
+
+            // above the eyes
+            dlib::point point_4 = little_face_points[19];
+            dlib::point point_5 = little_face_points[24];
+
+            // draw processed face
+            dlib::point bl(little_face_points[4]);
+            dlib::point br(little_face_points[12]);
+
+            // max y?
+            int max_y = std::max(bl.y(), br.y());
+            bl.y() = max_y;
+            br.y() = max_y;
+
+            dlib::point tl(bl.x(), point_4.y());
+            dlib::point tr(br.x(), point_5.y());
+
+            // min y?
+            int min_y = std::min(tl.y(), tr.y());
+            tl.y() = min_y;
+            tr.y() = min_y;
+
+            dlib::rectangle dlib_processed_face_rect(tl, br);
+            cv::Rect cv_processed_face_rect(dlib_processed_face_rect.left(), dlib_processed_face_rect.top(),
+                                            dlib_processed_face_rect.width(), dlib_processed_face_rect.height());
+
+            cv::Mat processed_face = dlib::toMat(bgr_full_face)(cv_processed_face_rect);
+
+//            static int width = processed_face.cols;
+//            static int height = processed_face.rows;
+
+            cv::Mat resized_processed_face;
+            cv::resize(processed_face, resized_processed_face, cv::Size(width, height), 0, 0, cv::INTER_CUBIC);
+
+            dlib::matrix<unsigned char> gray_processed_face;
+            dlib::assign_image(gray_processed_face, dlib::cv_image<dlib::bgr_pixel>(resized_processed_face));
+
+            cv::Mat gray_cv_face = dlib::toMat(gray_processed_face);
+            std::cout << "try predict:\n";
+            cv::imshow("try predict", gray_cv_face);
+            int predicted_label = -1;
+            double predicted_confidence = 0.0;
+
+            model->predict(gray_cv_face, predicted_label, predicted_confidence);
+
+            cv::rectangle(original, cv_rect_around_face, CV_RGB(0, 255,0), 1);
+
+            std::string box_text;
+            if(predicted_label == 0) {
+                box_text = "dima, " + std::to_string(predicted_confidence);
+            }
+            if(predicted_label == 1) {
+                box_text = "edgar, " + std::to_string(predicted_confidence);
+            }
+
+            int pos_x = std::max(cv_rect_around_face.tl().x - 10.0, 0.0);
+            int pos_y = std::max(cv_rect_around_face.tl().y - 10.0, 0.0);
+
+            cv::putText(original, box_text, cv::Point(pos_x, pos_y), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+            /*
             auto rect_around_face = cv_rect_around_faces[i];
 
             dlib::full_object_detection face_shape = face_shape_predictor(dlib_frame, dlib_rects_around_faces[i]);
@@ -130,6 +229,8 @@ int main(int argc, const char **argv)
 
             dlib::matrix<unsigned char> gray_processed_face;
             dlib::assign_image(gray_processed_face, rgb_processed_face);
+//            dlib::equalize_histogram(gray_processed_face);
+//            std::cout << cv_rect_around_faces[i].width << " - " << cv_rect_around_faces[i].height << '\n';
 
             cv::Mat gray_cv_face = dlib::toMat(gray_processed_face);
             int predicted_label = -1;
@@ -151,6 +252,7 @@ int main(int argc, const char **argv)
             int pos_y = std::max(rect_around_face.tl().y - 10.0, 0.0);
 
             cv::putText(original, box_text, cv::Point(pos_x, pos_y), cv::FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
+            */
         }
 
 
