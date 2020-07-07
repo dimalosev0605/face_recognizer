@@ -11,27 +11,139 @@
 #include <dlib/gui_widgets.h>
 #include <dlib/image_io.h>
 
+#include "boost/filesystem.hpp"
+
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <map>
 
-static void read_csv(const std::string& filename, std::vector<cv::Mat>& images, std::vector<int>& labels, char separator = ';')
+void read_csv(const std::string& filename, std::vector<cv::Mat>& images, std::vector<int>& labels, std::map<int, std::string>& objs)
 {
-    std::ifstream file(filename.c_str(), std::ifstream::in);
-    if(!file) {
-        std::string error_message = "No valid input file was given, please check the given filename.";
+    std::ifstream file(filename, std::ifstream::in);
+    if(!file.is_open()) {
+        std::cerr << "Csv file was not open!\n";
+        exit(1);
     }
-    std::string line, path, classlabel;
-    while (getline(file, line)) {
-        std::stringstream liness(line);
-        getline(liness, path, separator);
-        getline(liness, classlabel);
-        if(!path.empty() && !classlabel.empty()) {
-            auto img = cv::imread(path, cv::IMREAD_GRAYSCALE);
+
+    std::vector<std::string> lines;
+    std::string line;
+    while(getline(file, line)) {
+        lines.push_back(line);
+        line.clear();
+    }
+
+    for(std::size_t i = 0; i < lines.size(); ++i) {
+        const std::string temp = lines[i];
+
+        if(!temp.empty()) {
+            int begin_obj_name = -1;
+            int end_obj_name = -1;
+            for(std::size_t j = temp.size() - 1; j >= 0; --j) {
+                if(temp[j] == '/' && begin_obj_name == -1) {
+                    begin_obj_name = j;
+                    continue;
+                }
+                if(temp[j] == '/') {
+                    end_obj_name = j;
+                    break;
+                }
+            }
+
+            std::string obj_name;
+            for(int k = end_obj_name + 1; k < begin_obj_name; ++k) {
+                obj_name.push_back(temp[k]);
+            }
+
+            std::size_t begin_obj_id = temp.size() - 1;
+            const char separator = ';';
+
+            for(; temp[begin_obj_id ] != separator; --begin_obj_id ) {}
+
+            std::string obj_id;
+            for(std::size_t k = begin_obj_id  + 1; k < temp.size(); ++k) {
+                obj_id.push_back(temp[k]);
+            }
+
+            int id = std::stoi(obj_id);
+
+            std::cout << obj_name << " - " << id << '\n';
+            objs.insert({id, obj_name});
+
+            std::string abs_img_path;
+            for(std::size_t m = 0; m < begin_obj_id ; ++m) {
+                abs_img_path.push_back(temp[m]);
+            }
+
+            auto img = cv::imread(abs_img_path, cv::IMREAD_GRAYSCALE);
+
             images.push_back(img);
-            labels.push_back(atoi(classlabel.c_str()));
+            labels.push_back(id);
         }
     }
+
+//    std::string line, path, classlabel;
+//    while (getline(file, line)) {
+//        std::stringstream liness(line);
+//        getline(liness, path, separator);
+//        getline(liness, classlabel);
+//        if(!path.empty() && !classlabel.empty()) {
+//            auto img = cv::imread(path, cv::IMREAD_GRAYSCALE);
+//            images.push_back(img);
+//            labels.push_back(atoi(classlabel.c_str()));
+//        }
+//    }
+}
+
+std::string create_csv_file(const boost::filesystem::path& abs_path_to_data_set) {
+    boost::filesystem::directory_iterator dir_iter(abs_path_to_data_set);
+    boost::filesystem::directory_iterator dir_iter_end;
+
+    std::vector<boost::filesystem::path> obj_dirs;
+    for(; dir_iter != dir_iter_end; ++dir_iter) {
+        if(boost::filesystem::is_directory(dir_iter->path())) {
+            obj_dirs.push_back(dir_iter->path());
+        }
+    }
+
+    std::cout << "dir names $$$$$$$$$$$:\n";
+    for(const auto& dir : obj_dirs) {
+        std::cout << dir << '\n';
+    }
+    std::cout << "$$$$$$$$$$$\n";
+
+    const char separator = ';';
+    int obj_id = 0;
+    std::vector<std::string> obj_filenames;
+
+    const std::string csv_file = abs_path_to_data_set.string() + '/' + "csv.txt";
+
+    std::ofstream file(csv_file, std::ios_base::out);
+    if(!file.is_open()) {
+        std::cerr << "File " << csv_file << " was not opened!\n";
+        exit(1);
+    }
+
+    for(std::size_t i = 0; i < obj_dirs.size(); ++i) {
+        boost::filesystem::directory_iterator obj_dir_iter(obj_dirs[i]);
+        boost::filesystem::directory_iterator obj_dir_iter_end;
+
+        std::cout << "In " << obj_dirs[i] << '\n';
+        for(; obj_dir_iter != obj_dir_iter_end; ++obj_dir_iter) {
+            if(boost::filesystem::is_regular_file(obj_dir_iter->path())) {
+                std::cout << obj_dir_iter->path().filename() << '\n';
+                obj_filenames.push_back(obj_dir_iter->path().string() + separator + std::to_string(obj_id));
+            }
+        }
+
+        for(const auto& filename : obj_filenames) {
+            file << filename << '\n';
+        }
+        obj_filenames.clear();
+        ++obj_id;
+    }
+
+    return csv_file;
 }
 
 int main(int argc, const char **argv)
@@ -40,7 +152,7 @@ int main(int argc, const char **argv)
         std::cerr << "CLI error.\n"
                   << "Usage:\n"
                   << "[1] <path_to_face_landmarks.dat>\n"
-                  << "[2] <path_to_csv_file>\n"
+                  << "[2] <path_to_data_set>\n"
                   << "[3] <device_id>\n"
                   << "[4] <show uploaded images?> (int: 0 -> false, 1 -> true)\n"
                   << "[5] <model_threshold> (int: > 0, 0 -> don't set)\n"
@@ -51,7 +163,11 @@ int main(int argc, const char **argv)
         return 1;
     }
 
-    std::string fn_csv = std::string(argv[2]);
+    const std::string path_to_face_landmarks = argv[1];
+
+    const auto abs_path_to_data_set_dir = boost::filesystem::canonical(argv[2]);
+    std::string abs_path_to_csv_file = create_csv_file(abs_path_to_data_set_dir);
+
     int device_id = std::stoi(argv[3]);
 
     const int show_uploaded_images_temp = std::stoi(argv[4]);
@@ -70,13 +186,9 @@ int main(int argc, const char **argv)
 
     std::vector<cv::Mat> images;
     std::vector<int> labels;
+    std::map<int, std::string> objs;
 
-    try {
-        read_csv(fn_csv, images, labels);
-    } catch (cv::Exception& e) {
-        std::cerr << "Error opening file \"" << fn_csv << "\". Reason: " << e.msg << '\n';
-        return 1;
-    }
+    read_csv(abs_path_to_csv_file, images, labels, objs);
 
     if(images.empty()) {
         std::cerr << "Images were not uploaded!\n";
@@ -101,7 +213,7 @@ int main(int argc, const char **argv)
     dlib::frontal_face_detector frontal_face_detector = dlib::get_frontal_face_detector();
 
     dlib::shape_predictor face_shape_predictor;
-    dlib::deserialize(argv[1]) >> face_shape_predictor;
+    dlib::deserialize(path_to_face_landmarks) >> face_shape_predictor;
 
     cv::VideoCapture cap(device_id);
 
@@ -145,7 +257,7 @@ int main(int argc, const char **argv)
 
             std::vector<dlib::rectangle> rects_around_little_faces = frontal_face_detector(bgr_full_face);
             if(rects_around_little_faces.size() != 1) {
-                std::cerr << "PIZDA!\n";
+//                std::cerr << "PIZDA!\n";
                 continue;
             }
 
@@ -200,12 +312,12 @@ int main(int argc, const char **argv)
 
             dlib::matrix<unsigned char> gray_processed_face;
             dlib::assign_image(gray_processed_face, dlib::cv_image<dlib::bgr_pixel>(resized_processed_face));
+//            dlib::equalize_histogram(gray_processed_face);
 
             cv::Mat gray_cv_face = dlib::toMat(gray_processed_face);
 
             if(show_trying_prediction) {
                 cv::imshow("Trying predict", gray_cv_face);
-//                cv::destroyWindow("Trying predict");
             }
 
             int predicted_label = -1;
@@ -216,17 +328,15 @@ int main(int argc, const char **argv)
             cv::rectangle(original, cv_rect_around_face, CV_RGB(0, 255,0), 1);
 
             std::string box_text;
-            if(predicted_label == 0) {
-                box_text = "dima";
+            auto iter = objs.find(predicted_label);
+            if(iter != objs.end()) {
+                box_text = iter->second;
                 if(is_predicted_confidence_visible) {
-                    box_text += ", " + std::to_string(predicted_confidence);
+                     box_text +=  ", " + std::to_string(predicted_confidence);
                 }
             }
-            if(predicted_label == 1) {
-                box_text = "edgar";
-                if(is_predicted_confidence_visible) {
-                    box_text += ", " + std::to_string(predicted_confidence);
-                }
+            else {
+                box_text = "Unknown";
             }
 
             int pos_x = std::max(cv_rect_around_face.tl().x - 10.0, 0.0);
