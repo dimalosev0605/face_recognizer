@@ -18,6 +18,7 @@
 #include <sstream>
 #include <map>
 
+// this function reads csv.txt file and fills data structures.
 void read_csv(const std::string& filename, std::vector<cv::Mat>& images, std::vector<int>& labels, std::map<int, std::string>& objs)
 {
     std::ifstream file(filename, std::ifstream::in);
@@ -67,7 +68,6 @@ void read_csv(const std::string& filename, std::vector<cv::Mat>& images, std::ve
 
             int id = std::stoi(obj_id);
 
-            std::cout << obj_name << " - " << id << '\n';
             objs.insert({id, obj_name});
 
             std::string abs_img_path;
@@ -81,21 +81,11 @@ void read_csv(const std::string& filename, std::vector<cv::Mat>& images, std::ve
             labels.push_back(id);
         }
     }
-
-//    std::string line, path, classlabel;
-//    while (getline(file, line)) {
-//        std::stringstream liness(line);
-//        getline(liness, path, separator);
-//        getline(liness, classlabel);
-//        if(!path.empty() && !classlabel.empty()) {
-//            auto img = cv::imread(path, cv::IMREAD_GRAYSCALE);
-//            images.push_back(img);
-//            labels.push_back(atoi(classlabel.c_str()));
-//        }
-//    }
 }
 
+// this function create csv.txt file based on received data set. (File will created in directory with processed data set.)
 std::string create_csv_file(const boost::filesystem::path& abs_path_to_data_set) {
+
     boost::filesystem::directory_iterator dir_iter(abs_path_to_data_set);
     boost::filesystem::directory_iterator dir_iter_end;
 
@@ -106,21 +96,14 @@ std::string create_csv_file(const boost::filesystem::path& abs_path_to_data_set)
         }
     }
 
-    std::cout << "dir names $$$$$$$$$$$:\n";
-    for(const auto& dir : obj_dirs) {
-        std::cout << dir << '\n';
-    }
-    std::cout << "$$$$$$$$$$$\n";
-
     const char separator = ';';
     int obj_id = 0;
-    std::vector<std::string> obj_filenames;
 
     const std::string csv_file = abs_path_to_data_set.string() + '/' + "csv.txt";
 
     std::ofstream file(csv_file, std::ios_base::out);
     if(!file.is_open()) {
-        std::cerr << "File " << csv_file << " was not opened!\n";
+        std::cerr << "Csv file " << csv_file << " was not created!\n";
         exit(1);
     }
 
@@ -128,10 +111,9 @@ std::string create_csv_file(const boost::filesystem::path& abs_path_to_data_set)
         boost::filesystem::directory_iterator obj_dir_iter(obj_dirs[i]);
         boost::filesystem::directory_iterator obj_dir_iter_end;
 
-        std::cout << "In " << obj_dirs[i] << '\n';
+        std::vector<std::string> obj_filenames;
         for(; obj_dir_iter != obj_dir_iter_end; ++obj_dir_iter) {
             if(boost::filesystem::is_regular_file(obj_dir_iter->path())) {
-                std::cout << obj_dir_iter->path().filename() << '\n';
                 obj_filenames.push_back(obj_dir_iter->path().string() + separator + std::to_string(obj_id));
             }
         }
@@ -139,7 +121,7 @@ std::string create_csv_file(const boost::filesystem::path& abs_path_to_data_set)
         for(const auto& filename : obj_filenames) {
             file << filename << '\n';
         }
-        obj_filenames.clear();
+
         ++obj_id;
     }
 
@@ -149,24 +131,26 @@ std::string create_csv_file(const boost::filesystem::path& abs_path_to_data_set)
 int main(int argc, const char **argv)
 {
     if (argc != 10) {
-        std::cerr << "CLI error.\n"
+        std::cerr << "Usage error.\n"
                   << "Usage:\n"
                   << "[1] <path_to_face_landmarks.dat>\n"
                   << "[2] <path_to_data_set>\n"
                   << "[3] <device_id>\n"
                   << "[4] <show uploaded images?> (int: 0 -> false, 1 -> true)\n"
                   << "[5] <model_threshold> (int: > 0, 0 -> don't set)\n"
-                  << "[6] <full_face_shape_size> (int > 0). SAME AS IN PREPROCESSING!\n"
-                  << "[7] <full_face_shape_padding> (double >= 0). SAME AS IN PREPROCESSING!\n"
+                  << "[6] <full_face_shape_size> (int > 0)\n"
+                  << "[7] <full_face_shape_padding> (double >= 0)\n"
                   << "[8] <show, what we trying to predict? (int: 0 -> false, 1 -> true)>\n"
                   << "[9] <show predicted_confidence? (int: 0 -> false, 1 -> true)>\n";
         return 1;
     }
 
-    const std::string path_to_face_landmarks = argv[1];
+    // parse command line arguments.
 
+    const std::string path_to_face_landmarks = argv[1];
     const auto abs_path_to_data_set_dir = boost::filesystem::canonical(argv[2]);
-    std::string abs_path_to_csv_file = create_csv_file(abs_path_to_data_set_dir);
+
+    const auto abs_path_to_csv_file = create_csv_file(abs_path_to_data_set_dir);
 
     int device_id = std::stoi(argv[3]);
 
@@ -184,6 +168,9 @@ int main(int argc, const char **argv)
     const int is_predicted_confidence_visible_temp = std::stoi(argv[9]);
     const bool is_predicted_confidence_visible = is_predicted_confidence_visible_temp == 0 ? false : true;
 
+
+    // create data structures for data.
+
     std::vector<cv::Mat> images;
     std::vector<int> labels;
     std::map<int, std::string> objs;
@@ -194,6 +181,12 @@ int main(int argc, const char **argv)
         std::cerr << "Images were not uploaded!\n";
         return 1;
     }
+    if(images.size() == 1) {
+        std::cerr << "This program needs at least two images to work. Add more images to your data set.\n";
+        return 1;
+    }
+
+    // all images must have same size.
 
     const int img_width = images[0].cols;
     const int img_height = images[0].rows;
@@ -204,33 +197,50 @@ int main(int argc, const char **argv)
         }
     }
 
+    // create face recognizer and train it.
+
     cv::Ptr<cv::face::FaceRecognizer> model = cv::face::FisherFaceRecognizer::create();
     if(model_threshold != 0) {
         model->setThreshold(model_threshold);
     }
     model->train(images, labels);
 
-    dlib::frontal_face_detector frontal_face_detector = dlib::get_frontal_face_detector();
 
+    // create frontal face detector and shape predictor.
+
+    dlib::frontal_face_detector frontal_face_detector = dlib::get_frontal_face_detector();
     dlib::shape_predictor face_shape_predictor;
     dlib::deserialize(path_to_face_landmarks) >> face_shape_predictor;
+
+
+    // open video device.
 
     cv::VideoCapture cap(device_id);
 
     cv::namedWindow("face_recognizer", cv::WINDOW_NORMAL);
 
     if(!cap.isOpened()) {
-        std::cerr << "Capture Device ID " << device_id << " cannot be opened.\n";
+        std::cerr << "capture device id " << device_id << " cannot be opened.\n";
         return 1;
     }
 
+    // in this loop we do almost the same processing actions as in prepare_data_set program with images.
+
     for(;;)
     {
+        // read frame from video device.
+
         cv::Mat cv_frame;
         cap >> cv_frame;
         dlib::cv_image<dlib::bgr_pixel> dlib_frame(cv_frame);
 
+
+        // on this original frame we will draw rectangles around faces and predicted names.
+
         cv::Mat original = cv_frame.clone();
+
+
+        // find faces on the current frame.
 
         std::vector<dlib::rectangle> dlib_rects_around_faces = frontal_face_detector(dlib_frame);
         std::vector<cv::Rect_<int>> cv_rect_around_faces;
@@ -245,6 +255,8 @@ int main(int argc, const char **argv)
 
         for(std::size_t i = 0; i < cv_rect_around_faces.size(); ++i) {
 
+            // process every face. we will do same actions as in prepare_data_set program with images.
+
             dlib::rectangle rect_around_full_face = dlib_rects_around_faces[i];
             auto cv_rect_around_face = cv_rect_around_faces[i];
 
@@ -257,7 +269,6 @@ int main(int argc, const char **argv)
 
             std::vector<dlib::rectangle> rects_around_little_faces = frontal_face_detector(bgr_full_face);
             if(rects_around_little_faces.size() != 1) {
-//                std::cerr << "PIZDA!\n";
                 continue;
             }
 
@@ -270,25 +281,18 @@ int main(int argc, const char **argv)
                 little_face_points.push_back(little_face_shape.part(j));
             }
 
-            // main points:
-
-            // near ears
             dlib::point point_0 = little_face_points[0];
             dlib::point point_1 = little_face_points[16];
 
-            // under mouth
             dlib::point point_2 = little_face_points[5];
             dlib::point point_3 = little_face_points[11];
 
-            // above the eyes
             dlib::point point_4 = little_face_points[19];
             dlib::point point_5 = little_face_points[24];
 
-            // draw processed face
             dlib::point bl(little_face_points[4]);
             dlib::point br(little_face_points[12]);
 
-            // max y?
             int max_y = std::max(bl.y(), br.y());
             bl.y() = max_y;
             br.y() = max_y;
@@ -296,7 +300,6 @@ int main(int argc, const char **argv)
             dlib::point tl(bl.x(), point_4.y());
             dlib::point tr(br.x(), point_5.y());
 
-            // min y?
             int min_y = std::min(tl.y(), tr.y());
             tl.y() = min_y;
             tr.y() = min_y;
@@ -312,7 +315,6 @@ int main(int argc, const char **argv)
 
             dlib::matrix<unsigned char> gray_processed_face;
             dlib::assign_image(gray_processed_face, dlib::cv_image<dlib::bgr_pixel>(resized_processed_face));
-//            dlib::equalize_histogram(gray_processed_face);
 
             cv::Mat gray_cv_face = dlib::toMat(gray_processed_face);
 
@@ -320,12 +322,19 @@ int main(int argc, const char **argv)
                 cv::imshow("Trying predict", gray_cv_face);
             }
 
+
+            // Predicting.
+
             int predicted_label = -1;
             double predicted_confidence = 0.0;
-
             model->predict(gray_cv_face, predicted_label, predicted_confidence);
 
+
+            // draw rectangle around face we trying predict.
+
             cv::rectangle(original, cv_rect_around_face, CV_RGB(0, 255,0), 1);
+
+            // find face in our data set.
 
             std::string box_text;
             auto iter = objs.find(predicted_label);
@@ -339,6 +348,9 @@ int main(int argc, const char **argv)
                 box_text = "Unknown";
             }
 
+
+            // write preson name.
+
             int pos_x = std::max(cv_rect_around_face.tl().x - 10.0, 0.0);
             int pos_y = std::max(cv_rect_around_face.tl().y - 10.0, 0.0);
 
@@ -347,6 +359,7 @@ int main(int argc, const char **argv)
 
         imshow("face_recognizer", original);
         cv::waitKey(20);
+
     }
 
     return 0;
